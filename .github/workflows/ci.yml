@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # The tool reads ~/.claude and writes report files, so the OS matrix is not
+    # ceremony: path handling and symlink support are exactly what differs.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # 3.9 is the floor the README claims; test it rather than trusting it.
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install test dependencies
+        # The tool itself is stdlib-only by design; pytest is dev-only.
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Assert the tool has no third-party imports
+        # The "no dependencies" promise is load-bearing — it is why this can be
+        # curl'd onto a machine and run. Verify it instead of documenting it.
+        run: python scripts/check_stdlib_only.py
+
+      - name: Run the test suite
+        run: python -m pytest -q
+
+      - name: Smoke-test the CLI against an absent ~/.claude
+        # A machine that has never run Claude Code must get a clear message and
+        # exit 1, not a traceback.
+        run: |
+          set -eu
+          tmp="$(mktemp -d)"
+          out="$(HOME="$tmp" python cc_audit.py --no-store 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q "No transcripts found"
+          ! echo "$out" | grep -q "Traceback"
+
+      - name: Smoke-test --help
+        run: python cc_audit.py --help
