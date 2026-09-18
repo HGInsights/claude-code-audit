@@ -233,8 +233,14 @@ meant **40,548 of 82,841 assistant records were replays** — naively summing th
 overstated spend by roughly 2x.
 
 Billing happens once per `requestId`, so that is the unit of truth: the first
-occurrence of each request wins and the rest are dropped. Files sharing a
-`sessionId` are merged into one session.
+occurrence of each request wins and later ones are folded into it. Files sharing
+a `sessionId` are merged into one session.
+
+A streamed call is written once per content block under that one `requestId`,
+with cumulative counters, so the record carrying the most output holds the
+billed totals and the earlier ones are partial. This matters most on sessions
+that delegate heavily, since subagent transcripts are where the partial records
+land.
 
 ## Reading the numbers
 

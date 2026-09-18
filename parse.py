@@ -44,6 +44,14 @@ class Call:
     tools: list = field(default_factory=list)
     skill: str = None
 
+    def adopt_usage(self, other):
+        """Take another record's counters for this same billed call."""
+        self.raw_input = other.raw_input
+        self.cache_write_5m = other.cache_write_5m
+        self.cache_write_1h = other.cache_write_1h
+        self.cache_read = other.cache_read
+        self.output = other.output
+
     @property
     def total_input(self):
         return self.raw_input + self.cache_write_5m + self.cache_write_1h + self.cache_read
@@ -445,9 +453,10 @@ def load_sessions(root=None, since_days=None, limit=None, exclude=None):
     the same billed API call appears in several files, and roughly half of all
     assistant records on disk are replays.
 
-    Billing happens once per `requestId`, so that is the unit of truth: keep the
-    first occurrence of each request and drop the rest. Files sharing a
-    sessionId are merged into one Session, since they are one conversation.
+    Billing happens once per `requestId`, so that is the unit of truth: the
+    first occurrence of each request is kept and later ones are folded into it.
+    Files sharing a sessionId are merged into one Session, since they are one
+    conversation.
 
     `exclude` is a list of glob/name patterns; matching sessions are dropped
     before any analysis (see `is_excluded`).
@@ -465,7 +474,7 @@ def load_sessions(root=None, since_days=None, limit=None, exclude=None):
     if since_days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
 
-    seen_requests = set()
+    seen_requests = {}
     merged = {}
     excluded_sessions = set()
     for p in paths:
@@ -483,9 +492,15 @@ def load_sessions(root=None, since_days=None, limit=None, exclude=None):
                 continue  # replayed history from before the window
             # Calls with no requestId can't be dedup-keyed; keep them, they are rare.
             if c.request_id:
-                if c.request_id in seen_requests:
+                kept = seen_requests.get(c.request_id)
+                if kept is not None:
+                    # A streamed call is written once per content block with
+                    # cumulative counters, so the record with the most output
+                    # carries the billed totals.
+                    if c.output > kept.output:
+                        kept.adopt_usage(c)
                     continue
-                seen_requests.add(c.request_id)
+                seen_requests[c.request_id] = c
             fresh.append(c)
 
         key = s.session_id or p
