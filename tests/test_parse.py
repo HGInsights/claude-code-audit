@@ -382,6 +382,26 @@ class TestLoadSessions:
         assert sorted(c.request_id for c in sessions[0].calls) == [
             "req1", "req2", "req3"]
 
+    def test_a_streamed_call_keeps_its_final_output_count(self, transcript_dir):
+        # One call is written once per content block, and only the last record
+        # carries the finished output count; the earlier ones are placeholders.
+        write_transcript(transcript_dir / "a.jsonl", [
+            _assistant("req1", output=1),
+            _assistant("req1", output=3),
+            _assistant("req1", output=278)])
+        sessions, _ = parse.load_sessions(root=str(transcript_dir.parent))
+        assert [c.output for c in sessions[0].calls] == [278]
+
+    def test_a_streamed_call_keeps_its_final_input_counts(self, transcript_dir):
+        # A server tool running inside one call grows the input counters as it
+        # iterates, so the finished record is the one that was billed.
+        write_transcript(transcript_dir / "a.jsonl", [
+            _assistant("req1", raw=2679, read=0, output=3),
+            _assistant("req1", raw=10682, read=7123, output=510)])
+        sessions, _ = parse.load_sessions(root=str(transcript_dir.parent))
+        call, = sessions[0].calls
+        assert (call.raw_input, call.cache_read, call.output) == (10682, 7123, 510)
+
     def test_keeps_calls_that_have_no_request_id(self, transcript_dir):
         rec = _assistant("x")
         del rec["requestId"]
